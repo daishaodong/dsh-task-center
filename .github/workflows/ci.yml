@@ -1,0 +1,52 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax check the plugin halves
+        run: |
+          node --check index.js
+          node --check client.js
+
+      - name: Validate locale JSON
+        run: |
+          node -e "for (const f of ['locale/en.json','locale/zh.json']) JSON.parse(require('node:fs').readFileSync(f,'utf8')); console.log('locale ok')"
+
+      - name: Validate the bundle manifest
+        run: |
+          node -e "
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const fail = (msg) => { console.error(msg); process.exit(1) };
+          if (pkg.name !== 'dsh-task-center') fail('unexpected package name');
+          if (pkg.type !== 'module') fail('package must be an ES module');
+          if (!pkg.dsh || !pkg.dsh.bundle || !pkg.dsh.client) fail('missing dsh bundle/client declaration');
+          for (const [subpath, target] of Object.entries(pkg.exports)) {
+            const file = String(target).replace(/^\.\//, '');
+            if (file.includes('*')) continue;
+            if (!fs.existsSync(file)) fail('exports ' + subpath + ' points at a missing file: ' + file);
+          }
+          for (const entry of pkg.files) {
+            if (entry.includes('*')) continue;
+            if (!fs.existsSync(entry)) fail('files entry is missing: ' + entry);
+          }
+          console.log('manifest ok');
+          "
+
+      - name: Check the patch names the plugin
+        run: |
+          grep -q "name: 'dsh-task-center'" cordis.patch.yml
+          echo 'patch ok'
